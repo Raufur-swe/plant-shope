@@ -3,6 +3,7 @@ import TryCatch from "../middleware/TryCatch.js";
 import userModel from "../model/userModel.js";
 import crypto from "crypto"
 import senOTP from "../utils/sendMail.js";
+import mongoose from "mongoose";
 
 const authController = {
     // register
@@ -111,9 +112,89 @@ if (existingUser) {
             })
 
         
-    })
+    }),
 
     // verify otp
+
+    verifyOtp : TryCatch(async(req,res)=>{
+        
+        const session = mongoose.startSession()
+        try {
+            session.startTransaction();
+            
+            const {email , otp } = req.body
+            if (!email || !otp) {
+                await session.abortTransaction()
+                return res.status(400).json({
+                    success : false ,
+                    message : "email and otp required"
+                })
+            }
+            // redis data
+
+            const registerData = await redisClient.get(`register:${email}`)
+            if(!registerData){
+                await session.abortTransaction()
+                return res.status(400).json({
+                    success : false,
+                    message : "otp expired"
+                })
+            }
+
+            const data = JSON.parse(registerData)
+
+            // otp attempts
+            if(data.attempts>=5){
+                await redisClient.del(`register:${email}`)
+                await session.abortTransaction()
+                return res.status(400).json({
+                    success : false ,
+                    message : "meximum otp attempts"
+                })
+            }
+
+            const hashOtp = crypto.createHash("sha256").update(otp).digest("hex")
+
+            if(hashOtp !== data.hashOtp){
+                data.attempts += 1 
+
+                const ttl = await redisClient.ttl(`register:${email}`)
+
+                await redisClient.set(`register:${email}`,
+                    JSON.stringify(data),{
+                        EX : ttl > 0 ? ttl : 300
+                    }
+                )
+
+                await session.abortTransaction()
+
+                return res.status(400).json({
+                    success : false ,
+                    message :  "otp ivalid"
+                })
+            }
+
+            // if the verification is successful, check if the user already exists in the database
+
+            const exist = await userModel.findOne({
+                $or:[
+                    {email : data.email},
+                    {phone : data.phone}
+                ]
+            }).session(session)
+
+            if(exist){
+                await session.abortTransaction()
+
+                return res.status(400).json({
+                    success : false ,
+                    message : "user already exist"
+                })
+            }
+        } catch (error) {
+            
+        }
+    })
 }
 
 export default authController
