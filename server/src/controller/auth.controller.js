@@ -1,7 +1,8 @@
 import redisClient from "../config/redis.js";
-import TryCatch from "../middleware/TryCatch";
+import TryCatch from "../middleware/TryCatch.js";
 import userModel from "../model/userModel.js";
 import crypto from "crypto"
+import senOTP from "../utils/sendMail.js";
 
 const authController = {
     // register
@@ -89,13 +90,14 @@ if (existingUser) {
     }
 }
 
-        
-
 
             // genarate otp 
 
             const otp = crypto.randomInt(100000, 999999).toString()
             const hashOtp = crypto.createHash("sha256").update(otp).digest("hex")
+
+            // send otp
+            await senOTP(name , email , otp)
 
             // set on redis before varification
 
@@ -110,6 +112,8 @@ if (existingUser) {
 
         
     })
+
+    // verify otp
 }
 
 export default authController

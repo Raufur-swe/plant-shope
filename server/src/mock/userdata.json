@@ -1,0 +1,72 @@
+[
+  {
+    "name": "Raufur Uddin",
+    "email": "raufur.owner1@gmail.com",
+    "phone": "01712345671",
+    "password": "OwnerPass123",
+    "role": "owner"
+  },
+  {
+    "name": "Nusrat Jahan",
+    "email": "nusrat.owner2@gmail.com",
+    "phone": "01712345672",
+    "password": "OwnerPass123",
+    "role": "owner"
+  },
+  {
+    "name": "Tanvir Hasan",
+    "email": "tanvir.owner3@gmail.com",
+    "phone": "01712345673",
+    "password": "OwnerPass123",
+    "role": "owner"
+  },
+  {
+    "name": "Mim Akter",
+    "email": "mim.owner4@gmail.com",
+    "phone": "01712345674",
+    "password": "OwnerPass123",
+    "role": "owner"
+  },
+  {
+    "name": "Sakib Ahmed",
+    "email": "sakib.owner5@gmail.com",
+    "phone": "01712345675",
+    "password": "OwnerPass123",
+    "role": "owner"
+  },
+  {
+    "name": "Ayesha Rahman",
+    "email": "siram49544@ayable.com",
+    "phone": "01812345671",
+    "password": "Customer123",
+    "role": "customer"
+  },
+  {
+    "name": "Farhan Kabir",
+    "email": "farhan.customer2@gmail.com",
+    "phone": "01812345672",
+    "password": "Customer123",
+    "role": "customer"
+  },
+  {
+    "name": "Sumaiya Islam",
+    "email": "sumaiya.customer3@gmail.com",
+    "phone": "01812345673",
+    "password": "Customer123",
+    "role": "customer"
+  },
+  {
+    "name": "Mehedi Hasan",
+    "email": "mehedi.customer4@gmail.com",
+    "phone": "01812345674",
+    "password": "Customer123",
+    "role": "customer"
+  },
+  {
+    "name": "Jannat Ara",
+    "email": "jannat.customer5@gmail.com",
+    "phone": "01812345675",
+    "password": "Customer123",
+    "role": "customer"
+  }
+]
