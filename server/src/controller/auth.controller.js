@@ -2,197 +2,287 @@ import redisClient from "../config/redis.js";
 import TryCatch from "../middleware/TryCatch.js";
 import userModel from "../model/userModel.js";
 import crypto from "crypto"
+import bcrypt from "bcrypt"
 import senOTP from "../utils/sendMail.js";
 import mongoose from "mongoose";
+import customerModel from "../model/customerModel.js";
+import ownerModel from "../model/ownerModel.js";
+import { genarateAccessToken, genarateRefreshToken } from "../utils/jwt.js";
+import { accessCookieOption, refreshCookieOption } from "../utils/cookie.js";
 
 const authController = {
     // register
 
     register: TryCatch(async (req, res) => {
 
-        
-            let { name, email, phone, password, role } = req.body
+
+        let { name, email, phone, password, role } = req.body
 
 
-            // normalize inputes
+        // normalize inputes
 
-            name = name?.trim()
-            email = email?.trim().toLowerCase()
-            phone = phone?.trim()
-            password = password?.trim()
-            role = role?.trim().toLowerCase()
+        name = name?.trim()
+        email = email?.trim().toLowerCase()
+        phone = phone?.trim()
+        password = password?.trim()
+        role = role?.trim().toLowerCase()
 
-            if (!name || !email || !phone || !password || !role) {
-                return res.status(400).json({
+        if (!name || !email || !phone || !password || !role) {
+            return res.status(400).json({
+                success: false,
+                message: "all field are required"
+            })
+        }
+
+        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+        if (!emailRegex.test(email)) {
+            return res.status(400).json({
+                success: false,
+                message: "invalid email !"
+            })
+        }
+        const phoneRegex = /^(?:\+88|01)?\d{11}$/
+        if (!phoneRegex.test(phone)) {
+            return res.status(400).json({
+                success: false,
+                message: "invalid number !"
+            })
+        }
+
+        if (password.length < 8) {
+            return res.status(400).json({
+                success: false,
+                message: "password must be 8 charecter or more"
+            })
+        }
+
+        if (!["customer", "owner"].includes(role)) {
+            return res.status(403).json({
+                success: false,
+                message: "inavlid role"
+            })
+        }
+
+        // if a otp already send and its not expires then show a error message
+
+        const pendingRegistration = await redisClient.exists(`register:${email}`)
+        if (pendingRegistration) {
+            return res.status(429).json({
+                success: false,
+                message: "OTP already sent. Please wait until it expires.",
+            });
+        }
+
+
+        // find existing user
+        const existingUser = await userModel.findOne({
+            $or: [{ email }, { phone }],
+        });
+
+        if (existingUser) {
+            if (existingUser.email === email) {
+                return res.status(409).json({
                     success: false,
-                    message: "all field are required"
-                })
-            }
-
-            const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-
-            if (!emailRegex.test(email)) {
-                return res.status(400).json({
-                    success: false,
-                    message: "invalid email !"
-                })
-            }
-            const phoneRegex = /^(?:\+88|01)?\d{11}$/
-             if (!phoneRegex.test(phone)) {
-                return res.status(400).json({
-                    success: false,
-                    message: "invalid number !"
-                })
-            }
-
-            if (password.length < 8) {
-                return res.status(400).json({
-                    success: false,
-                    message: "password must be 8 charecter or more"
-                })
-            }
-
-            if (!["customer", "owner"].includes(role)) {
-                return res.status(403).json({
-                    success: false,
-                    message: "inavlid role"
-                })
-            }
-
-                // if a otp already send and its not expires then show a error message
-
-            const pendingRegistration = await redisClient.exists(`register:${email}`)
-            if (pendingRegistration) {
-                return res.status(429).json({
-                    success: false,
-                    message: "OTP already sent. Please wait until it expires.",
+                    message: "Email already exists.",
                 });
             }
 
-
-            // find existing user
-            const existingUser = await userModel.findOne({
-    $or: [{ email }, { phone }],
-});
-
-if (existingUser) {
-    if (existingUser.email === email) {
-        return res.status(409).json({
-            success: false,
-            message: "Email already exists.",
-        });
-    }
-
-    if (existingUser.phone === phone) {
-        return res.status(409).json({
-            success: false,
-            message: "Phone number already exists.",
-        });
-    }
-}
+            if (existingUser.phone === phone) {
+                return res.status(409).json({
+                    success: false,
+                    message: "Phone number already exists.",
+                });
+            }
+        }
 
 
-            // genarate otp 
+        // genarate otp 
 
-            const otp = crypto.randomInt(100000, 999999).toString()
-            const hashOtp = crypto.createHash("sha256").update(otp).digest("hex")
+        const otp = crypto.randomInt(100000, 999999).toString()
+        const hashOtp = crypto.createHash("sha256").update(otp).digest("hex")
 
-            // send otp
-            await senOTP(name , email , otp)
+        // send otp
+        await senOTP(name, email, otp)
 
-            // set on redis before varification
+        // set on redis before varification
 
-            await redisClient.set(`register:${email}`, JSON.stringify({
-                name, email, phone, password, hashOtp, role
-            }), { EX: 300 })
+        await redisClient.set(`register:${email}`, JSON.stringify({
+            name, email, phone, password, hashOtp, role
+        }), { EX: 300 })
 
-            return res.status(200).json({
-                 success: true,
-                message: "OTP sent successfully.",
-            })
+        return res.status(200).json({
+            success: true,
+            message: "OTP sent successfully.",
+        })
 
-        
+
     }),
 
     // verify otp
 
-    verifyOtp : TryCatch(async(req,res)=>{
-        
-        const session = mongoose.startSession()
+    verifyOtp: TryCatch(async (req, res) => {
+
+        const session =  await mongoose.startSession()
         try {
             session.startTransaction();
-            
-            const {email , otp } = req.body
+
+            const { email, otp } = req.body
             if (!email || !otp) {
                 await session.abortTransaction()
                 return res.status(400).json({
-                    success : false ,
-                    message : "email and otp required"
+                    success: false,
+                    message: "email and otp required"
                 })
             }
+
             // redis data
 
             const registerData = await redisClient.get(`register:${email}`)
-            if(!registerData){
+            
+            if (!registerData) {
                 await session.abortTransaction()
                 return res.status(400).json({
-                    success : false,
-                    message : "otp expired"
+                    success: false,
+                    message: "otp expired or not found"
                 })
             }
 
             const data = JSON.parse(registerData)
 
             // otp attempts
-            if(data.attempts>=5){
+            if (data.attempts >= 5) {
                 await redisClient.del(`register:${email}`)
                 await session.abortTransaction()
                 return res.status(400).json({
-                    success : false ,
-                    message : "meximum otp attempts"
+                    success: false,
+                    message: "maximum otp attempts"
                 })
             }
 
             const hashOtp = crypto.createHash("sha256").update(otp).digest("hex")
 
-            if(hashOtp !== data.hashOtp){
-                data.attempts += 1 
+            if (hashOtp !== data.hashOtp) {
+                data.attempts += 1
 
                 const ttl = await redisClient.ttl(`register:${email}`)
 
                 await redisClient.set(`register:${email}`,
-                    JSON.stringify(data),{
-                        EX : ttl > 0 ? ttl : 300
-                    }
+                    JSON.stringify(data), {
+                    EX: ttl > 0 ? ttl : 300
+                }
                 )
 
                 await session.abortTransaction()
 
                 return res.status(400).json({
-                    success : false ,
-                    message :  "otp ivalid"
+                    success: false,
+                    message: "otp ivalid"
                 })
             }
 
             // if the verification is successful, check if the user already exists in the database
 
             const exist = await userModel.findOne({
-                $or:[
-                    {email : data.email},
-                    {phone : data.phone}
+                $or: [
+                    { email: data.email },
+                    { phone: data.phone }
                 ]
             }).session(session)
 
-            if(exist){
+            if (exist) {
                 await session.abortTransaction()
 
                 return res.status(400).json({
-                    success : false ,
-                    message : "user already exist"
+                    success: false,
+                    message: "user already exist"
                 })
             }
+
+            const user = await userModel.create(
+                [
+                    {
+                        name: data.name,
+                        email: data.email,
+                        phone: data.phone,
+                        password: data.password,
+                        role: data.role
+                    }
+
+                ], { session }
+            )
+
+            const newUser = user[0]
+
+            if (newUser.role === "customer") {
+                await customerModel.create(
+                    [
+                        {
+                            user: newUser._id
+                        }
+                    ], { session }
+                )
+            }
+            if (newUser.role === "owner") {
+                await ownerModel.create(
+                    [
+                        {
+                            user: newUser._id
+                        }
+                    ], { session }
+                )
+            }
+
+            await session.commitTransaction()
+
+            // accessToken
+
+            const accessToken = genarateAccessToken({
+                id: newUser._id.toString(),
+                role: newUser.role
+            })
+            // refreshToken
+
+            const refreshToken = genarateRefreshToken({
+                id: newUser._id.toString(),
+
+            })
+
+            //set refreshtoken in redis
+            const hashedrefreshToken = await bcrypt.hash(refreshToken, 10)
+
+            await redisClient.set(`refresh:${newUser._id}`, hashedrefreshToken, { EX: 7*24*60*60 })
+
+            res.cookie(
+                "accessToken",
+                accessToken,
+                accessCookieOption
+            )
+            res.cookie(
+                "refreshToken",
+                refreshToken,
+                refreshCookieOption
+            )
+
+            await redisClient.del(`register:${email}`)
+
+            newUser.password = undefined
+
+            return res.status(201).json({
+                success : true,
+                message : "account create successfully, please login",
+                user : newUser
+            })
+
         } catch (error) {
-            
+            await session.abortTransaction()
+            return res.status(500).json({
+                success : false,
+                message : "registration failed!!",
+                error : error.message
+            })
+        }finally{
+            await session.endSession()
         }
     })
 }
