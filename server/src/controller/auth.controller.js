@@ -7,7 +7,7 @@ import senOTP from "../utils/sendMail.js";
 import mongoose from "mongoose";
 import customerModel from "../model/customerModel.js";
 import ownerModel from "../model/ownerModel.js";
-import { genarateAccessToken, genarateRefreshToken } from "../utils/jwt.js";
+import { genarateAccessToken, genarateRefreshToken, verifyRefreshToken } from "../utils/jwt.js";
 import { accessCookieOption, refreshCookieOption } from "../utils/cookie.js";
 
 const authController = {
@@ -284,7 +284,169 @@ const authController = {
         }finally{
             await session.endSession()
         }
-    })
+    }),
+
+    // login
+
+    login:TryCatch(async(req ,res)=>{
+        let { email ,password} = req.body
+
+        email = email?.toLowerCase().trim()
+        password = password?.trim()
+
+        if(!email || !password){
+            return res.status(400).json({
+                success : false ,
+                message : "email or password required"
+            })
+        }
+
+        const user = await userModel.findOne({email}).select("+password")
+
+        if(!user){
+             return res.status(401).json({
+                success : false ,
+                message : "no such user"
+            }) 
+        }
+
+        const matchPassword = await user.compairPassword(password)
+
+        if (!matchPassword) {
+            return res.status(401).json({
+                success : false ,
+                message : "Invalid email or password"
+            }) 
+        }
+
+        const accessToken = genarateAccessToken({
+            id : user._id.toString(),
+            role : user.role
+        })
+        const refreshToken = genarateRefreshToken({
+            id : user._id.toString(),
+            
+        })
+
+        const hashRefreshToken = await bcrypt.hash(refreshToken , 10)
+
+        await redisClient.set(`refresh:${user._id}`, hashRefreshToken , {EX : 7*24*60*60})
+
+        res.cookie(
+            "accessToken",
+            accessToken ,
+            accessCookieOption      
+        )
+
+        res.cookie(
+            "refreshToken",
+            refreshToken,
+            refreshCookieOption
+        )
+
+        // hide pass
+
+        user.password = undefined
+
+        return res.status(200).json({
+                success : true ,
+                message : "login successfully",
+                user
+            }) 
+    }),
+
+    // refresh token
+
+    refreshToken: TryCatch(async (req, res) => {
+    const oldRefreshToken = req.cookies?.refreshToken;
+
+    if (!oldRefreshToken) {
+        return res.status(401).json({
+            success: false,
+            message: "Refresh token missing",
+        });
+    }
+
+    try {
+        const decode = await verifyRefreshToken(oldRefreshToken);
+
+        const storedToken = await redisClient.get(`refresh:${decode.id}`);
+
+        if (!storedToken) {
+            return res.status(401).json({
+                success: false,
+                message: "Session expired",
+            });
+        }
+
+        const isMatched = await bcrypt.compare(
+            oldRefreshToken,
+            storedToken
+        );
+
+        if (!isMatched) {
+            await redisClient.del(`refresh:${decode.id}`);
+
+            res.clearCookie("accessToken");
+            res.clearCookie("refreshToken");
+
+            return res.status(403).json({
+                success: false,
+                message: "Token reuse detected",
+            });
+        }
+
+        const user = await userModel.findById(decode.id);
+
+        const newAccessToken = genarateAccessToken({
+            id: user._id.toString(),
+            role: user.role,
+        });
+
+        const newRefreshToken = genarateRefreshToken({
+            id: user._id.toString(),
+        });
+
+        const hashedRefreshToken = await bcrypt.hash(
+            newRefreshToken,
+            12
+        );
+
+        await redisClient.set(
+            `refresh:${decode.id}`,
+            hashedRefreshToken,
+            { EX: 7 * 24 * 60 * 60 }
+        );
+
+        res.cookie(
+            "accessToken",
+            newAccessToken,
+            accessCookieOption
+        );
+
+        res.cookie(
+            "refreshToken",
+            newRefreshToken,
+            refreshCookieOption
+        );
+
+        return res.status(200).json({
+            success: true,
+            message: "Token refreshed successfully",
+        });
+
+    } catch (error) {
+
+        res.clearCookie("accessToken");
+        res.clearCookie("refreshToken");
+
+        return res.status(401).json({
+            success: false,
+            message: "Invalid refresh token",
+        });
+    }
+})
+
 }
 
 export default authController

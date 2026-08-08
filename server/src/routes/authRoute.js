@@ -6,6 +6,7 @@ const AuthRouter = express.Router()
 
 AuthRouter.post("/register" , authController.register)
 AuthRouter.post("/otp-verification" , authController.verifyOtp)
+AuthRouter.post("/login" , authController.login)
 
 
 export default AuthRouter
