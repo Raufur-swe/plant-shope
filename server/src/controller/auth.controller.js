@@ -445,6 +445,28 @@ const authController = {
             message: "Invalid refresh token",
         });
     }
+}),
+
+// logout
+
+logout : TryCatch(async(req,res)=>{
+    try {
+        const refreshToken = req.cookies?.refreshToken;
+
+        if(refreshToken){
+            const decode = await verifyRefreshToken(refreshToken)
+        await redisClient.del(`refresh:${decode.id}`)
+        }
+    } catch (error) { }
+
+    res.clearCookie("refreshToken" , accessCookieOption);
+    res.clearCookie("accessToken" , refreshCookieOption);
+
+    return res.status(200).json({
+            success: true,
+            message: "Logout Successful",
+        });
+    
 })
 
 }
